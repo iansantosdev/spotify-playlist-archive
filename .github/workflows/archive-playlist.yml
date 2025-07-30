@@ -1,0 +1,70 @@
+name: Archive Spotify Playlist
+
+on:
+  schedule:
+    # Run daily at 9:00 AM UTC
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+    inputs:
+      playlists_config:
+        description: "JSON array of playlist configs (optional - overrides env var)"
+        required: false
+        type: string
+      playlist_ids:
+        description: "Comma-separated Spotify Playlist IDs (optional - for quick archive)"
+        required: false
+        type: string
+
+jobs:
+  archive-playlist:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Archive playlists
+        env:
+          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+          SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
+          SPOTIFY_REFRESH_TOKEN: ${{ secrets.SPOTIFY_REFRESH_TOKEN }}
+          SPOTIFY_PLAYLISTS_CONFIG: ${{ inputs.playlists_config || secrets.SPOTIFY_PLAYLISTS_CONFIG }}
+          SPOTIFY_PLAYLIST_IDS: ${{ inputs.playlist_ids || secrets.SPOTIFY_PLAYLIST_IDS }}
+        run: |
+          python playlist_archiver.py
+
+      - name: Upload archive log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: archive-log-${{ github.run_number }}
+          path: archive_log.json
+          retention-days: 30
+
+      - name: Commit and push archive log (optional)
+        if: success()
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add archive_log.json
+          git diff --staged --quiet || git commit -m "Add playlist archive session for $(date -u +%Y-%m-%d)"
+          git push
+        continue-on-error: true
